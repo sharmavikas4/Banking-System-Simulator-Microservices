@@ -1,0 +1,13 @@
+package com.model.dto;
+
+import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+
+@Schema(description = "Account Creation Request Body")
+public record AccountCreateRequest(
+		@NotBlank(message = "Account Holder Name must not be null or only white spaces")
+		@Pattern(regexp = "[A-Za-z ]+",message = "Account Holder Name must contain only alphabets and spaces")
+		String holderName
+) {
+}

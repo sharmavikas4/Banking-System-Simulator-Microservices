@@ -1,0 +1,5 @@
+spring.application.name=AccountService
+server.port=8081
+eureka.client.service-url.defaulZone=http://localhost:8716/eureka
+spring.cloud.config.discovery.enabled: true         # enable Eureka discovery
+ spring.cloud.config.discovery.service-id: config-server

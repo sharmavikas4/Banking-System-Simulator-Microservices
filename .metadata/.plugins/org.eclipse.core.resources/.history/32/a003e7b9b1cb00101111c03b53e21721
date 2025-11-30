@@ -1,0 +1,79 @@
+package com.controllers;
+
+import java.util.List;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.model.Transaction;
+import com.model.dto.TransactionRequest;
+import com.model.dto.TransactionResponse;
+import com.model.dto.TransferRequest;
+import com.model.dto.TransferResponse;
+import com.service.impl.TransactionService;
+
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+
+@Validated
+@RestController
+@RequestMapping("/api/transactions")
+public class TransactionController {
+	
+	private static final Logger LOGGER = LoggerFactory.getLogger(TransactionController.class);
+	
+	@Autowired
+	private TransactionService transactionService;
+
+	@PostMapping("/deposit")
+	public ResponseEntity<TransactionResponse> deposit(
+			@Valid
+			@RequestBody
+			TransactionRequest transactionRequest
+	){
+		LOGGER.info("API Call: Deposit request received for accountNumber={} amount={}",transactionRequest.accountNumber(), transactionRequest.amount());
+		TransactionResponse transaction = transactionService.deposit(transactionRequest);
+		return ResponseEntity.ok(transaction);
+	}
+	
+	@PostMapping("/withdraw")
+	public ResponseEntity<TransactionResponse> withdraw(
+			@Valid
+			@RequestBody
+			TransactionRequest transactionRequest
+	){
+		TransactionResponse transaction = transactionService.withdraw(transactionRequest);
+		return ResponseEntity.ok(transaction);
+	}
+	
+	@PostMapping("/transfer")
+	public ResponseEntity<TransferResponse> transfer(
+			@Valid
+			@RequestBody
+			TransferRequest transferRequest
+	){
+		TransferResponse transaction = transactionService.transfer(transferRequest);
+		return ResponseEntity.ok(transaction);
+	}
+	
+	@GetMapping("/account/{accountNumber}")
+	public ResponseEntity<List<Transaction>> getAllTransactions(
+			@PathVariable
+			@NotBlank(message = "Account Number must not be null or only white spaces")
+			@Pattern(regexp = "^[A-Z]{3}\\d{4}$",message = "Account number must be three uppercase alphabets followed by four digits")
+			String accountNumber
+	){
+		List<Transaction> transactions = transactionService.getAllTransactions(accountNumber);
+		return ResponseEntity.ok(transactions);
+	}
+}

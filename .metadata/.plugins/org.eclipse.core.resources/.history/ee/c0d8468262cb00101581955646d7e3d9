@@ -1,0 +1,46 @@
+package com.util.feign;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+
+import com.exceptions.AccountNotFoundException;
+import com.exceptions.BadRequestException;
+import com.exceptions.ExternalServiceException;
+import com.model.dto.account.AccountTransactionRequest;
+import com.model.dto.account.AccountTransactionResponse;
+import com.util.enums.Status;
+
+import feign.FeignException;
+
+@Component
+public class AccountServiceFallback{
+	private Logger LOGGER = LoggerFactory.getLogger(AccountServiceFallback.class);
+    public AccountTransactionResponse updateBalance(String accountNumber, AccountTransactionRequest request,Throwable e) {
+    	if (e instanceof FeignException feinException) {
+        	int status = feinException.status();
+        	String body = feinException.contentUTF8();
+        	switch (status) {
+	            case 404 -> {
+	                LOGGER.warn("Account not found while depositing. status=404, body={}", body);
+	                throw new AccountNotFoundException("No account found for accountNumber=" + accountNumber);
+	            }
+	            case 400 -> {
+	                LOGGER.warn("Bad request / validation / insufficient balance. status=400, body={}", body);
+	                throw new BadRequestException("Invalid transaction request for accountNumber=" + request);
+	            }
+	            case 500 -> {
+	                LOGGER.error("Account service internal error. status=500, body={}", body);
+	                throw new ExternalServiceException("Account service internal error");
+	            }
+	            default -> {
+	                LOGGER.error("Unexpected error from Account service. status={}, body={}", status, body);
+	                throw new ExternalServiceException("Unexpected error from Account Service");
+	            }
+        	}
+        }else {
+        	LOGGER.error("Non-Feign error or circuit breaker open while calling Account service", e);
+        	throw new ExternalServiceException("Account Service unavailable or circuit breaker open");
+        }
+    }
+}

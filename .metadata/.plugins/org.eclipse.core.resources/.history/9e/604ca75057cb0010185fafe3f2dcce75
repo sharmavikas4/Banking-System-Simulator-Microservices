@@ -1,0 +1,28 @@
+package com.util.feign;
+
+import feign.Response;
+import feign.codec.ErrorDecoder;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import com.exceptions.AccountNotFoundException;
+
+@Configuration
+public class FeignConfig {
+
+    @Bean
+    public ErrorDecoder errorDecoder() {
+        return new ErrorDecoder() {
+            private final ErrorDecoder defaultDecoder = new Default();
+
+            @Override
+            public Exception decode(String methodKey, Response response) {
+                if (response.status() == 404) {
+                    // Trigger fallbackFactory by throwing a FeignException
+                    return new AccountNotFoundException("Account not found");
+                }
+                return defaultDecoder.decode(methodKey, response);
+            }
+        };
+    
+}

@@ -1,0 +1,15 @@
+package com.util.feign;
+
+public class AccountServiceFallback {
+	@Override
+    public AccountTransactionResponse updateBalance(String accountNumber, AccountTransactionRequest request) {
+        return new AccountTransactionResponse(
+            "dummyid",
+            accountNumber,
+            "Dummy Name",
+            request.getAmount(),
+            Status.INACTIVE
+        );
+    }
+
+}

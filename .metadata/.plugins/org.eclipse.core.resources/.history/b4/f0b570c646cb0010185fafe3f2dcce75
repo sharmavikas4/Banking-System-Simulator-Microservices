@@ -1,0 +1,45 @@
+server.port=8082
+eureka.client.service-url.defaultZone=http://localhost:8761/eureka
+spring.data.mongodb.uri=mongodb://localhost:27017/Transaction
+
+# =====================================================
+# FEIGN + CIRCUIT BREAKER INTEGRATION (VERY IMPORTANT)
+# =====================================================
+feign.circuitbreaker.enabled=true
+
+
+# =====================================================
+# CIRCUIT BREAKER CONFIG
+# Instance name: accountServiceCB
+# =====================================================
+resilience4j.circuitbreaker.instances.accountServiceCB.register-health-indicator=true
+resilience4j.circuitbreaker.instances.accountServiceCB.failure-rate-threshold=50
+resilience4j.circuitbreaker.instances.accountServiceCB.slow-call-rate-threshold=50
+resilience4j.circuitbreaker.instances.accountServiceCB.wait-duration-in-open-state=5s
+resilience4j.circuitbreaker.instances.accountServiceCB.permitted-number-of-calls-in-half-open-state=3
+resilience4j.circuitbreaker.instances.accountServiceCB.sliding-window-type=COUNT_BASED
+resilience4j.circuitbreaker.instances.accountServiceCB.sliding-window-size=10
+resilience4j.circuitbreaker.instances.accountServiceCB.minimum-number-of-calls=5
+resilience4j.circuitbreaker.instances.accountServiceCB.slow-call-duration-threshold=2000ms
+
+# Do NOT treat ExternalServiceException as failure (optional)
+resilience4j.circuitbreaker.instances.accountServiceCB.ignore-exceptions=com.exceptions.ExternalServiceException
+
+
+# =====================================================
+# RETRY CONFIG
+# Instance name: accountServiceRetry
+# =====================================================
+resilience4j.retry.instances.accountServiceRetry.max-attempts=3
+resilience4j.retry.instances.accountServiceRetry.wait-duration=500ms
+resilience4j.retry.instances.accountServiceRetry.enable-exponential-backoff=true
+resilience4j.retry.instances.accountServiceRetry.exponential-backoff-multiplier=2
+resilience4j.retry.instances.accountServiceRetry.retry-exceptions=feign.RetryableException,feign.FeignException
+
+
+# =====================================================
+# TIME LIMITER CONFIG
+# Bind TimeLimiter & CircuitBreaker using SAME instance name
+# (Only works if you use @CircuitBreaker + @TimeLimiter)
+# =====================================================
+resilience4j.timelimiter.instances.accountServiceCB.timeout-duration=3s

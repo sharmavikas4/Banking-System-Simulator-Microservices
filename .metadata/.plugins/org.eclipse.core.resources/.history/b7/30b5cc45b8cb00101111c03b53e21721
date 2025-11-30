@@ -1,0 +1,13 @@
+package com.util.feign;
+
+import com.model.dto.notification.NotificationRequest;
+
+public class NotificationServiceFallback implements NotificationServiceClient{
+
+	@Override
+	public String sendNotification(NotificationRequest notificationRequest) {
+		// TODO Auto-generated method stub
+		return null;
+	}
+
+}

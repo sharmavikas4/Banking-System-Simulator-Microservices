@@ -1,0 +1,23 @@
+package com.util.feign;
+
+import org.springframework.cloud.openfeign.FallbackFactory;
+import org.springframework.stereotype.Component;
+
+import com.exceptions.AccountNotFoundException;
+import com.model.dto.account.AccountTransactionRequest;
+import com.model.dto.account.AccountTransactionResponse;
+
+@Component
+class AccountServiceFallbackFactory implements FallbackFactory<AccountServiceClient> {
+    @Override
+    public AccountServiceClient create(Throwable cause) {
+        return new AccountServiceClient() {
+            @Override
+            public AccountTransactionResponse updateBalance(String accountNumber, AccountTransactionRequest request) {
+                // handle fallback here
+                throw new AccountNotFoundException("Fallback: Account not found for " + accountNumber);
+            }
+        };
+    }
+}
+

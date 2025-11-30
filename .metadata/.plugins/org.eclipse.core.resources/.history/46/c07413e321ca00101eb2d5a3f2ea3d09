@@ -1,0 +1,11 @@
+package com.model.dto;
+
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+
+public record AccountCreateRequest(
+		@NotBlank(message = "Account Holder Name must not be null or only white spaces")
+		@Pattern(regexp = "[A-Za-z ]+",message = "Account Holder Name must contain only alphabets and spaces")
+		String holderName
+) {
+}

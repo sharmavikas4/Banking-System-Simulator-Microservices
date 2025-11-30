@@ -1,0 +1,5 @@
+package com.util.feign;
+
+public class AccountServiceFallbackFactory {
+
+}

@@ -1,0 +1,3 @@
+spring.application.name=AccountService
+spring.cloud.config.discovery.enabled=true
+spring.cloud.config.discovery.service-id=config-server

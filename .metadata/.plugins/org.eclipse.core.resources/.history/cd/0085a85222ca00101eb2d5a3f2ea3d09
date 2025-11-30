@@ -1,0 +1,14 @@
+package com.model.dto;
+
+
+import com.util.enums.Status;
+
+import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotNull;
+
+@Schema(description = "Account Status Update Request Body")
+public record AccountStatusUpdateRequest(
+		@NotNull(message = "Status must not be null")
+		Status status
+) {
+}

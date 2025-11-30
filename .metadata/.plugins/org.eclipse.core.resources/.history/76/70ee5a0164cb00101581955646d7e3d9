@@ -1,0 +1,56 @@
+package com.util.feign;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+
+import com.exceptions.AccountNotFoundException;
+import com.exceptions.BadRequestException;
+import com.exceptions.ExternalServiceException;
+import com.model.dto.account.AccountTransactionRequest;
+import com.model.dto.account.AccountTransactionResponse;
+import com.util.enums.Status;
+import org.springframework.cloud.openfeign.FallbackFactory;
+import feign.FeignException;
+
+@Component
+public class AccountServiceFallback implements FallbackFactory<AccountServiceClient> {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(AccountServiceFallback.class);
+
+    @Override
+    public AccountServiceClient create(Throwable throwable) {
+
+        return (accountNumber, request) -> {
+
+            if (throwable instanceof FeignException fe) {
+
+                int status = fe.status();
+                String body = fe.contentUTF8();
+
+                switch (status) {
+                    case 404 -> {
+                        LOGGER.warn("Account not found. status=404 body={}", body);
+                        throw new AccountNotFoundException("No account found for accountNumber=" + accountNumber);
+                    }
+                    case 400 -> {
+                        LOGGER.warn("Invalid request. status=400 body={}", body);
+                        throw new BadRequestException("Validation failed for request=" + request);
+                    }
+                    case 500 -> {
+                        LOGGER.error("Account service internal error. status=500 body={}", body);
+                        throw new ExternalServiceException("Account service internal error");
+                    }
+                    default -> {
+                        LOGGER.error("Unknown error from account service. status={} body={}", status, body);
+                        throw new ExternalServiceException("Unexpected error from Account Service");
+                    }
+                }
+
+            } else {
+                LOGGER.error("Circuit breaker open or unexpected error", throwable);
+                throw new ExternalServiceException("Account Service unavailable (Circuit Breaker OPEN)");
+            }
+        };
+    }
+}

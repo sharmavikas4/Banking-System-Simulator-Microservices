@@ -1,0 +1,14 @@
+package com.util.feign;
+
+import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PutMapping;
+
+import com.model.dto.TransactionRequest;
+
+@FeignClient(name="AccountService",path = "/api/account")
+public interface AccountService {
+	
+	@PutMapping("/{accountNumber}/balance")
+	ResponseEntity<Account> updateBalance(String accountNumber,TransactionRequest transactionRequest);
+}

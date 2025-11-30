@@ -1,0 +1,575 @@
+package com.service;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import java.time.LocalDateTime;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import com.exceptions.AccountNotFoundException;
+import com.exceptions.BadRequestException;
+import com.exceptions.DatabaseException;
+import com.exceptions.ExternalServiceException;
+import com.exceptions.InactiveAccountException;
+import com.exceptions.InsufficientBalanceException;
+import com.model.Transaction;
+import com.model.dto.TransactionRequest;
+import com.model.dto.TransactionResponse;
+import com.model.dto.account.AccountTransactionRequest;
+import com.model.dto.account.AccountTransactionResponse;
+import com.model.dto.notification.NotificationRequest;
+import com.repository.TransactionRepository;
+import com.service.impl.TransactionService;
+import com.util.enums.Status;
+import com.util.enums.TransactionStatus;
+import com.util.enums.TransactionType;
+import com.util.feign.AccountServiceClient;
+import com.util.feign.NotificationServiceClient;
+import com.util.transaction.GenerateTransactionId;
+
+@ExtendWith(MockitoExtension.class)
+public class WithdrawServiceTest {
+	
+	@Mock
+	private TransactionRepository transactionRepository;
+	
+	@Mock
+	private AccountServiceClient accountServiceClient;
+	
+	@Mock
+	private NotificationServiceClient notificationServiceClient;
+	
+	@InjectMocks
+	private TransactionService transactionService;
+	
+	private TransactionRequest createTransactionRequest(String accountNumber, double amount) {
+	    return new TransactionRequest(accountNumber, amount);
+	}
+	
+	private Transaction createTransaction(String accountNumber,String txnId, double amount, TransactionStatus status) {
+	    Transaction transaction = new Transaction();
+	    transaction.setAccountNumber(accountNumber);
+	    transaction.setAmount(amount);
+	    transaction.setTimestamp(LocalDateTime.now());
+	    transaction.setStatus(status);
+	    transaction.setType(TransactionType.WITHDRAW);
+	    transaction.setTransactionId(GenerateTransactionId.generate());
+	    return transaction;
+	}
+	
+	private NotificationRequest createNotificationRequest(Transaction transaction) {
+	    String msg = String.format(
+	        "TXID=%s | ACCOUNT=%s | AMOUNT=%.2f | TYPE=WITHDRAW | STATUS=%s",
+	        transaction.getTransactionId(),
+	        transaction.getAccountNumber(),
+	        transaction.getAmount(),
+	        transaction.getStatus()
+	    );
+	    return new NotificationRequest(msg);
+	}
+	
+	@Test
+	void withdraw_Success() {
+		String accountNumber="VIK3710";
+		String accountId = "6929c62d33103c6a540ca089";
+		String name="Vikas Sharma";
+		double amount =1000;
+		String txnId = GenerateTransactionId.generate();
+		TransactionRequest transactionRequest = createTransactionRequest(accountNumber, amount);
+		Transaction transaction = createTransaction(accountNumber, txnId, amount, TransactionStatus.SUCCESS);
+		AccountTransactionResponse accountTransactionResponse = new AccountTransactionResponse(accountId, accountNumber, name, amount, Status.ACTIVE);
+		when(accountServiceClient.updateBalance(eq(accountNumber), any(AccountTransactionRequest.class))).thenReturn(accountTransactionResponse);
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		NotificationRequest notificationRequest = createNotificationRequest(transaction);
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(notificationRequest)).thenReturn(message);
+		TransactionResponse response = TransactionResponse.builder()
+															.accountNumber(transaction.getAccountNumber())
+															.amount(transaction.getAmount())
+															.timestamp(transaction.getTimestamp())
+															.status(transaction.getStatus())
+															.id(transaction.getId())
+															.transactionId(transaction.getTransactionId())
+															.type(transaction.getType())
+															.build();
+		TransactionResponse  result = transactionService.withdraw(transactionRequest);
+		assertEquals(response.getAccountNumber(), result.getAccountNumber());
+	    assertEquals(response.getAmount(), result.getAmount());
+	    assertEquals(response.getStatus(), result.getStatus());
+	    assertEquals(response.getType(), result.getType());
+	    verify(accountServiceClient, times(1)).updateBalance(eq(accountNumber), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any());
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	@Test
+	void withdraw_AccountServiceClient_AccountNotFound() {
+		String accountNumber="VIK3710";
+		double amount =1000;
+		String txnId = GenerateTransactionId.generate();
+		TransactionRequest transactionRequest = createTransactionRequest(accountNumber, amount);
+		Transaction transaction = createTransaction(accountNumber, txnId, amount, TransactionStatus.FAILED);
+		when(accountServiceClient.updateBalance(eq(accountNumber), any(AccountTransactionRequest.class))).thenThrow(new AccountNotFoundException("No Account Found"));
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		NotificationRequest notificationRequest = createNotificationRequest(transaction);
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(notificationRequest)).thenReturn(message);
+		assertThrows(AccountNotFoundException.class, () -> transactionService.withdraw(transactionRequest));
+	    verify(accountServiceClient, times(1)).updateBalance(eq(accountNumber), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any());
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	@Test
+	void withdraw_AccountServiceClient_AccountNotFound_DatabaseException() {
+		String accountNumber="VIK3710";
+		double amount =1000;
+		TransactionRequest transactionRequest = createTransactionRequest(accountNumber, amount);
+		when(accountServiceClient.updateBalance(eq(accountNumber), any(AccountTransactionRequest.class))).thenThrow(new AccountNotFoundException("No Account Found"));
+		when(transactionRepository.save(any(Transaction.class))).thenThrow(new DatabaseException("Database Error"));
+		assertThrows(DatabaseException.class, () -> transactionService.withdraw(transactionRequest));
+	    verify(accountServiceClient, times(1)).updateBalance(eq(accountNumber), any(AccountTransactionRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	@Test
+	void withdraw_AccountServiceClient_AccountNotFound_NotificationNotSent() {
+		String accountNumber="VIK3710";
+		double amount =1000;
+		String txnId = GenerateTransactionId.generate();
+		TransactionRequest transactionRequest = createTransactionRequest(accountNumber, amount);
+		Transaction transaction = createTransaction(accountNumber, txnId, amount, TransactionStatus.FAILED);
+		when(accountServiceClient.updateBalance(eq(accountNumber), any(AccountTransactionRequest.class))).thenThrow(new AccountNotFoundException("No Account Found"));
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		String msg = String.format(
+		        "TXID=%s | ACCOUNT=%s | AMOUNT=%.2f | TYPE=WITHDRAW | STATUS=%s",
+		        transaction.getTransactionId(),
+		        transaction.getAccountNumber(),
+		        transaction.getAmount(),
+		        transaction.getStatus()
+		);
+		NotificationRequest notificationRequest = new NotificationRequest(msg);
+		when(notificationServiceClient.sendNotification(notificationRequest)).thenThrow(new ExternalServiceException("Notification Service unavailable"));
+		assertThrows(AccountNotFoundException.class, () -> transactionService.withdraw(transactionRequest));
+	    verify(accountServiceClient, times(1)).updateBalance(eq(accountNumber), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any());
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void withdraw_AccountServiceClient_InactiveAccountException() {
+		String accountNumber="VIK3710";
+		double amount =1000;
+		LocalDateTime time = LocalDateTime.now();
+		String txnId = GenerateTransactionId.generate();
+		TransactionRequest transactionRequest = new TransactionRequest(accountNumber,amount);
+		Transaction transaction = new Transaction();
+		transaction.setAccountNumber(accountNumber);
+		transaction.setAmount(amount);
+		transaction.setTimestamp(time);
+		transaction.setStatus(TransactionStatus.FAILED);
+		transaction.setType(TransactionType.WITHDRAW);
+		transaction.setTransactionId(txnId);
+		when(accountServiceClient.updateBalance(eq(accountNumber), any(AccountTransactionRequest.class))).thenThrow(new InactiveAccountException("Inactive Account"));
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		String msg = String.format(
+		        "TXID=%s | ACCOUNT=%s | AMOUNT=%.2f | TYPE=WITHDRAW | STATUS=%s",
+		        transaction.getTransactionId(),
+		        transaction.getAccountNumber(),
+		        transaction.getAmount(),
+		        transaction.getStatus()
+		);
+		NotificationRequest notificationRequest = new NotificationRequest(msg);
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(notificationRequest)).thenReturn(message);
+		assertThrows(InactiveAccountException.class, () -> transactionService.withdraw(transactionRequest));
+	    verify(accountServiceClient, times(1)).updateBalance(eq(accountNumber), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any());
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	@Test
+	void withdraw_AccountServiceClient_InactiveAccountException_DatabaseException() {
+		String accountNumber="VIK3710";
+		double amount =1000;
+		LocalDateTime time = LocalDateTime.now();
+		String txnId = GenerateTransactionId.generate();
+		TransactionRequest transactionRequest = new TransactionRequest(accountNumber,amount);
+		Transaction transaction = new Transaction();
+		transaction.setAccountNumber(accountNumber);
+		transaction.setAmount(amount);
+		transaction.setTimestamp(time);
+		transaction.setStatus(TransactionStatus.FAILED);
+		transaction.setType(TransactionType.WITHDRAW);
+		transaction.setTransactionId(txnId);
+		when(accountServiceClient.updateBalance(eq(accountNumber), any(AccountTransactionRequest.class))).thenThrow(new InactiveAccountException("Inactive Account"));
+		when(transactionRepository.save(any(Transaction.class))).thenThrow(new DatabaseException("Database Error"));
+		assertThrows(DatabaseException.class, () -> transactionService.withdraw(transactionRequest));
+	    verify(accountServiceClient, times(1)).updateBalance(eq(accountNumber), any(AccountTransactionRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	@Test
+	void withdraw_AccountServiceClient_InactiveAccountException_NotificationNotSent() {
+		String accountNumber="VIK3710";
+		double amount =1000;
+		LocalDateTime time = LocalDateTime.now();
+		String txnId = GenerateTransactionId.generate();
+		TransactionRequest transactionRequest = new TransactionRequest(accountNumber,amount);
+		Transaction transaction = new Transaction();
+		transaction.setAccountNumber(accountNumber);
+		transaction.setAmount(amount);
+		transaction.setTimestamp(time);
+		transaction.setStatus(TransactionStatus.FAILED);
+		transaction.setType(TransactionType.WITHDRAW);
+		transaction.setTransactionId(txnId);
+		when(accountServiceClient.updateBalance(eq(accountNumber), any(AccountTransactionRequest.class))).thenThrow(new InactiveAccountException("Inactive Account"));
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		String msg = String.format(
+		        "TXID=%s | ACCOUNT=%s | AMOUNT=%.2f | TYPE=WITHDRAW | STATUS=%s",
+		        transaction.getTransactionId(),
+		        transaction.getAccountNumber(),
+		        transaction.getAmount(),
+		        transaction.getStatus()
+		);
+		NotificationRequest notificationRequest = new NotificationRequest(msg);
+		when(notificationServiceClient.sendNotification(notificationRequest)).thenThrow(new ExternalServiceException("Notification Service unavailable"));
+		assertThrows(InactiveAccountException.class, () -> transactionService.withdraw(transactionRequest));
+	    verify(accountServiceClient, times(1)).updateBalance(eq(accountNumber), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any());
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void withdraw_AccountServiceClient_InsufficientBalanceException() {
+		String accountNumber="VIK3710";
+		double amount =1000;
+		LocalDateTime time = LocalDateTime.now();
+		String txnId = GenerateTransactionId.generate();
+		TransactionRequest transactionRequest = new TransactionRequest(accountNumber,amount);
+		Transaction transaction = new Transaction();
+		transaction.setAccountNumber(accountNumber);
+		transaction.setAmount(amount);
+		transaction.setTimestamp(time);
+		transaction.setStatus(TransactionStatus.FAILED);
+		transaction.setType(TransactionType.WITHDRAW);
+		transaction.setTransactionId(txnId);
+		when(accountServiceClient.updateBalance(eq(accountNumber), any(AccountTransactionRequest.class))).thenThrow(new InsufficientBalanceException("Insufficient balance"));
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		String msg = String.format(
+		        "TXID=%s | ACCOUNT=%s | AMOUNT=%.2f | TYPE=WITHDRAW | STATUS=%s",
+		        transaction.getTransactionId(),
+		        transaction.getAccountNumber(),
+		        transaction.getAmount(),
+		        transaction.getStatus()
+		);
+		NotificationRequest notificationRequest = new NotificationRequest(msg);
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(notificationRequest)).thenReturn(message);
+		assertThrows(InsufficientBalanceException.class, () -> transactionService.withdraw(transactionRequest));
+	    verify(accountServiceClient, times(1)).updateBalance(eq(accountNumber), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any());
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	@Test
+	void withdraw_AccountServiceClient_InsufficientBalanceException_DatabaseException() {
+		String accountNumber="VIK3710";
+		double amount =1000;
+		LocalDateTime time = LocalDateTime.now();
+		String txnId = GenerateTransactionId.generate();
+		TransactionRequest transactionRequest = new TransactionRequest(accountNumber,amount);
+		Transaction transaction = new Transaction();
+		transaction.setAccountNumber(accountNumber);
+		transaction.setAmount(amount);
+		transaction.setTimestamp(time);
+		transaction.setStatus(TransactionStatus.FAILED);
+		transaction.setType(TransactionType.WITHDRAW);
+		transaction.setTransactionId(txnId);
+		when(accountServiceClient.updateBalance(eq(accountNumber), any(AccountTransactionRequest.class))).thenThrow(new InsufficientBalanceException("Insufficient balance"));
+		when(transactionRepository.save(any(Transaction.class))).thenThrow(new DatabaseException("Database Error"));
+		assertThrows(DatabaseException.class, () -> transactionService.withdraw(transactionRequest));
+	    verify(accountServiceClient, times(1)).updateBalance(eq(accountNumber), any(AccountTransactionRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	@Test
+	void withdraw_AccountServiceClient_InsufficientBalanceException_NotificationNotSent() {
+		String accountNumber="VIK3710";
+		double amount =1000;
+		LocalDateTime time = LocalDateTime.now();
+		String txnId = GenerateTransactionId.generate();
+		TransactionRequest transactionRequest = new TransactionRequest(accountNumber,amount);
+		Transaction transaction = new Transaction();
+		transaction.setAccountNumber(accountNumber);
+		transaction.setAmount(amount);
+		transaction.setTimestamp(time);
+		transaction.setStatus(TransactionStatus.FAILED);
+		transaction.setType(TransactionType.WITHDRAW);
+		transaction.setTransactionId(txnId);
+		when(accountServiceClient.updateBalance(eq(accountNumber), any(AccountTransactionRequest.class))).thenThrow(new InsufficientBalanceException("Insufficient balance"));
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		String msg = String.format(
+		        "TXID=%s | ACCOUNT=%s | AMOUNT=%.2f | TYPE=WITHDRAW | STATUS=%s",
+		        transaction.getTransactionId(),
+		        transaction.getAccountNumber(),
+		        transaction.getAmount(),
+		        transaction.getStatus()
+		);
+		NotificationRequest notificationRequest = new NotificationRequest(msg);
+		when(notificationServiceClient.sendNotification(notificationRequest)).thenThrow(new ExternalServiceException("Notification Service unavailable"));
+		assertThrows(InsufficientBalanceException.class, () -> transactionService.withdraw(transactionRequest));
+	    verify(accountServiceClient, times(1)).updateBalance(eq(accountNumber), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any());
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void withdraw_AccountServiceClient_BadRequestException() {
+		String accountNumber="VIK3710";
+		double amount =1000;
+		LocalDateTime time = LocalDateTime.now();
+		String txnId = GenerateTransactionId.generate();
+		TransactionRequest transactionRequest = new TransactionRequest(accountNumber,amount);
+		Transaction transaction = new Transaction();
+		transaction.setAccountNumber(accountNumber);
+		transaction.setAmount(amount);
+		transaction.setTimestamp(time);
+		transaction.setStatus(TransactionStatus.FAILED);
+		transaction.setType(TransactionType.WITHDRAW);
+		transaction.setTransactionId(txnId);
+		when(accountServiceClient.updateBalance(eq(accountNumber), any(AccountTransactionRequest.class))).thenThrow(new BadRequestException("Validation Failed"));
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		String msg = String.format(
+		        "TXID=%s | ACCOUNT=%s | AMOUNT=%.2f | TYPE=WITHDRAW | STATUS=%s",
+		        transaction.getTransactionId(),
+		        transaction.getAccountNumber(),
+		        transaction.getAmount(),
+		        transaction.getStatus()
+		);
+		NotificationRequest notificationRequest = new NotificationRequest(msg);
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(notificationRequest)).thenReturn(message);
+		assertThrows(BadRequestException.class, () -> transactionService.withdraw(transactionRequest));
+	    verify(accountServiceClient, times(1)).updateBalance(eq(accountNumber), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any());
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	@Test
+	void withdraw_AccountServiceClient_BadRequestException_DatabaseException() {
+		String accountNumber="VIK3710";
+		double amount =1000;
+		LocalDateTime time = LocalDateTime.now();
+		String txnId = GenerateTransactionId.generate();
+		TransactionRequest transactionRequest = new TransactionRequest(accountNumber,amount);
+		Transaction transaction = new Transaction();
+		transaction.setAccountNumber(accountNumber);
+		transaction.setAmount(amount);
+		transaction.setTimestamp(time);
+		transaction.setStatus(TransactionStatus.FAILED);
+		transaction.setType(TransactionType.WITHDRAW);
+		transaction.setTransactionId(txnId);
+		when(accountServiceClient.updateBalance(eq(accountNumber), any(AccountTransactionRequest.class))).thenThrow(new BadRequestException("Validation Failed"));
+		when(transactionRepository.save(any(Transaction.class))).thenThrow(new DatabaseException("Database Error"));
+		assertThrows(DatabaseException.class, () -> transactionService.withdraw(transactionRequest));
+	    verify(accountServiceClient, times(1)).updateBalance(eq(accountNumber), any(AccountTransactionRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	@Test
+	void withdraw_AccountServiceClient_BadRequestException_NotificationNotSent() {
+		String accountNumber="VIK3710";
+		double amount =1000;
+		LocalDateTime time = LocalDateTime.now();
+		String txnId = GenerateTransactionId.generate();
+		TransactionRequest transactionRequest = new TransactionRequest(accountNumber,amount);
+		Transaction transaction = new Transaction();
+		transaction.setAccountNumber(accountNumber);
+		transaction.setAmount(amount);
+		transaction.setTimestamp(time);
+		transaction.setStatus(TransactionStatus.FAILED);
+		transaction.setType(TransactionType.WITHDRAW);
+		transaction.setTransactionId(txnId);
+		when(accountServiceClient.updateBalance(eq(accountNumber), any(AccountTransactionRequest.class))).thenThrow(new BadRequestException("Validation Failed"));
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		String msg = String.format(
+		        "TXID=%s | ACCOUNT=%s | AMOUNT=%.2f | TYPE=WITHDRAW | STATUS=%s",
+		        transaction.getTransactionId(),
+		        transaction.getAccountNumber(),
+		        transaction.getAmount(),
+		        transaction.getStatus()
+		);
+		NotificationRequest notificationRequest = new NotificationRequest(msg);
+		when(notificationServiceClient.sendNotification(notificationRequest)).thenThrow(new ExternalServiceException("Notification Service unavailable"));
+		assertThrows(BadRequestException.class, () -> transactionService.withdraw(transactionRequest));
+	    verify(accountServiceClient, times(1)).updateBalance(eq(accountNumber), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any());
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	@Test
+	void withdraw_AccountServiceClient_ExternalDatabaseException() {
+		String accountNumber="VIK3710";
+		double amount =1000;
+		LocalDateTime time = LocalDateTime.now();
+		String txnId = GenerateTransactionId.generate();
+		TransactionRequest transactionRequest = new TransactionRequest(accountNumber,amount);
+		Transaction transaction = new Transaction();
+		transaction.setAccountNumber(accountNumber);
+		transaction.setAmount(amount);
+		transaction.setTimestamp(time);
+		transaction.setStatus(TransactionStatus.FAILED);
+		transaction.setType(TransactionType.WITHDRAW);
+		transaction.setTransactionId(txnId);
+		when(accountServiceClient.updateBalance(eq(accountNumber), any(AccountTransactionRequest.class))).thenThrow(new DatabaseException("Database Error"));
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		String msg = String.format(
+		        "TXID=%s | ACCOUNT=%s | AMOUNT=%.2f | TYPE=WITHDRAW | STATUS=%s",
+		        transaction.getTransactionId(),
+		        transaction.getAccountNumber(),
+		        transaction.getAmount(),
+		        transaction.getStatus()
+		);
+		NotificationRequest notificationRequest = new NotificationRequest(msg);
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(notificationRequest)).thenReturn(message);
+		assertThrows(DatabaseException.class, () -> transactionService.withdraw(transactionRequest));
+	    verify(accountServiceClient, times(1)).updateBalance(eq(accountNumber), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any());
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	@Test
+	void withdraw_AccountServiceClient_ExternalDatabaseException_DatabaseException() {
+		String accountNumber="VIK3710";
+		double amount =1000;
+		LocalDateTime time = LocalDateTime.now();
+		String txnId = GenerateTransactionId.generate();
+		TransactionRequest transactionRequest = new TransactionRequest(accountNumber,amount);
+		Transaction transaction = new Transaction();
+		transaction.setAccountNumber(accountNumber);
+		transaction.setAmount(amount);
+		transaction.setTimestamp(time);
+		transaction.setStatus(TransactionStatus.FAILED);
+		transaction.setType(TransactionType.WITHDRAW);
+		transaction.setTransactionId(txnId);
+		when(accountServiceClient.updateBalance(eq(accountNumber), any(AccountTransactionRequest.class))).thenThrow(new DatabaseException("Database Error"));
+		when(transactionRepository.save(any(Transaction.class))).thenThrow(new DatabaseException("Database Error"));
+		assertThrows(DatabaseException.class, () -> transactionService.withdraw(transactionRequest));
+	    verify(accountServiceClient, times(1)).updateBalance(eq(accountNumber), any(AccountTransactionRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void withdraw_AccountServiceClient_ExternalDatabaseException_NotificationNotSent() {
+		String accountNumber="VIK3710";
+		double amount =1000;
+		LocalDateTime time = LocalDateTime.now();
+		String txnId = GenerateTransactionId.generate();
+		TransactionRequest transactionRequest = new TransactionRequest(accountNumber,amount);
+		Transaction transaction = new Transaction();
+		transaction.setAccountNumber(accountNumber);
+		transaction.setAmount(amount);
+		transaction.setTimestamp(time);
+		transaction.setStatus(TransactionStatus.FAILED);
+		transaction.setType(TransactionType.WITHDRAW);
+		transaction.setTransactionId(txnId);
+		when(accountServiceClient.updateBalance(eq(accountNumber), any(AccountTransactionRequest.class))).thenThrow(new DatabaseException("Database Error"));
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		String msg = String.format(
+		        "TXID=%s | ACCOUNT=%s | AMOUNT=%.2f | TYPE=WITHDRAW | STATUS=%s",
+		        transaction.getTransactionId(),
+		        transaction.getAccountNumber(),
+		        transaction.getAmount(),
+		        transaction.getStatus()
+		);
+		NotificationRequest notificationRequest = new NotificationRequest(msg);
+		when(notificationServiceClient.sendNotification(notificationRequest)).thenThrow(new ExternalServiceException("Notification Service unavailable"));
+		assertThrows(DatabaseException.class, () -> transactionService.withdraw(transactionRequest));
+	    verify(accountServiceClient, times(1)).updateBalance(eq(accountNumber), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any());
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	@Test
+	void withdraw_AccountServiceClient_ExternalServiceException() {
+		String accountNumber="VIK3710";
+		double amount =1000;
+		LocalDateTime time = LocalDateTime.now();
+		String txnId = GenerateTransactionId.generate();
+		TransactionRequest transactionRequest = new TransactionRequest(accountNumber,amount);
+		Transaction transaction = new Transaction();
+		transaction.setAccountNumber(accountNumber);
+		transaction.setAmount(amount);
+		transaction.setTimestamp(time);
+		transaction.setStatus(TransactionStatus.FAILED);
+		transaction.setType(TransactionType.WITHDRAW);
+		transaction.setTransactionId(txnId);
+		when(accountServiceClient.updateBalance(eq(accountNumber), any(AccountTransactionRequest.class))).thenThrow(new ExternalServiceException("External Service Error"));
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		String msg = String.format(
+		        "TXID=%s | ACCOUNT=%s | AMOUNT=%.2f | TYPE=WITHDRAW | STATUS=%s",
+		        transaction.getTransactionId(),
+		        transaction.getAccountNumber(),
+		        transaction.getAmount(),
+		        transaction.getStatus()
+		);
+		NotificationRequest notificationRequest = new NotificationRequest(msg);
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(notificationRequest)).thenReturn(message);
+		assertThrows(ExternalServiceException.class, () -> transactionService.withdraw(transactionRequest));
+	    verify(accountServiceClient, times(1)).updateBalance(eq(accountNumber), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any());
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	@Test
+	void withdraw_AccountServiceClient_ExternalServiceException_DatabaseException() {
+		String accountNumber="VIK3710";
+		double amount =1000;
+		LocalDateTime time = LocalDateTime.now();
+		String txnId = GenerateTransactionId.generate();
+		TransactionRequest transactionRequest = new TransactionRequest(accountNumber,amount);
+		Transaction transaction = new Transaction();
+		transaction.setAccountNumber(accountNumber);
+		transaction.setAmount(amount);
+		transaction.setTimestamp(time);
+		transaction.setStatus(TransactionStatus.FAILED);
+		transaction.setType(TransactionType.WITHDRAW);
+		transaction.setTransactionId(txnId);
+		when(accountServiceClient.updateBalance(eq(accountNumber), any(AccountTransactionRequest.class))).thenThrow(new ExternalServiceException("External Service Error"));
+		when(transactionRepository.save(any(Transaction.class))).thenThrow(new DatabaseException("Database Error"));
+		assertThrows(DatabaseException.class, () -> transactionService.withdraw(transactionRequest));
+	    verify(accountServiceClient, times(1)).updateBalance(eq(accountNumber), any(AccountTransactionRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void withdraw_AccountServiceClient_ExternalServiceException_NotificationNotSent() {
+		String accountNumber="VIK3710";
+		double amount =1000;
+		LocalDateTime time = LocalDateTime.now();
+		String txnId = GenerateTransactionId.generate();
+		TransactionRequest transactionRequest = new TransactionRequest(accountNumber,amount);
+		Transaction transaction = new Transaction();
+		transaction.setAccountNumber(accountNumber);
+		transaction.setAmount(amount);
+		transaction.setTimestamp(time);
+		transaction.setStatus(TransactionStatus.FAILED);
+		transaction.setType(TransactionType.WITHDRAW);
+		transaction.setTransactionId(txnId);
+		when(accountServiceClient.updateBalance(eq(accountNumber), any(AccountTransactionRequest.class))).thenThrow(new ExternalServiceException("External Service Error"));
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		String msg = String.format(
+		        "TXID=%s | ACCOUNT=%s | AMOUNT=%.2f | TYPE=WITHDRAW | STATUS=%s",
+		        transaction.getTransactionId(),
+		        transaction.getAccountNumber(),
+		        transaction.getAmount(),
+		        transaction.getStatus()
+		);
+		NotificationRequest notificationRequest = new NotificationRequest(msg);
+		when(notificationServiceClient.sendNotification(notificationRequest)).thenThrow(new ExternalServiceException("Notification Service unavailable"));
+		assertThrows(ExternalServiceException.class, () -> transactionService.withdraw(transactionRequest));
+	    verify(accountServiceClient, times(1)).updateBalance(eq(accountNumber), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any());
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+}

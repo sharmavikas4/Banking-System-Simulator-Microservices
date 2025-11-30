@@ -1,0 +1,63 @@
+package com.service.impl;
+
+import java.util.concurrent.CompletableFuture;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import com.model.dto.account.AccountTransactionResponse;
+import com.util.feign.AccountServiceClient;
+
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import io.github.resilience4j.retry.annotation.Retry;
+import io.github.resilience4j.timelimiter.annotation.TimeLimiter;
+
+@Service
+public class AccountService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(AccountService.class);
+
+    @Autowired
+    private AccountServiceClient accountServiceClient;
+
+    @CircuitBreaker(name = "accountServiceCB", fallbackMethod = "updateBalanceFallback")
+    @Retry(name = "accountServiceRetry")
+    @TimeLimiter(name = "accountServiceCB")
+    public CompletableFuture<AccountTransactionResponse> updateBalance(String accountNumber, AccountTransactionRequest request) {
+
+        return CompletableFuture.supplyAsync(() -> {
+            LOGGER.info("Calling Account Service for account={}, updateType={}",
+                    accountNumber, request.getUpdateType());
+
+            AccountResponse response = accountServiceClient.updateBalance(accountNumber, request);
+
+            LOGGER.info("Received response from Account Service for account={}, status={}",
+                    accountNumber, response.status());
+
+            return response;
+        });
+    }
+
+    /**
+     * FALLBACK
+     */
+    public CompletableFuture<AccountResponse> updateBalanceFallback(
+            String accountNumber,
+            AccountTransactionRequest request,
+            Throwable exception
+    ) {
+        LOGGER.error("Fallback triggered for account={}, reason={}",
+                accountNumber, exception.getMessage());
+
+        AccountResponse fallbackResponse = new AccountResponse(
+                accountNumber,
+                0,
+                "FAILED — Account Service is down"
+        );
+
+        return CompletableFuture.completedFuture(fallbackResponse);
+    }
+}
+

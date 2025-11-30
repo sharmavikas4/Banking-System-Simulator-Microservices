@@ -1,0 +1,70 @@
+server.port=8082
+
+# Eureka Discovery
+eureka.client.service-url.defaultZone=http://localhost:8761/eureka
+
+# MongoDB
+spring.data.mongodb.uri=mongodb://localhost:27017/Transaction
+logging.pattern.console=%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} [corrId=%X{correlationId}] - %msg%n
+# Enable Feign + Resilience4j integration
+spring.cloud.openfeign.circuitbreaker.enabled=true
+spring.cloud.openfeign.circuitbreaker.alphanumeric-ids.enabled=true
+
+# ------------------------------
+# FEIGN CLIENT CONFIGURATION
+# ------------------------------
+
+# Timeouts \u2014 REQUIRED for production
+feign.client.config.default.connect-timeout=2000       # 2 seconds
+feign.client.config.default.read-timeout=3000          # 3 seconds
+feign.client.config.default.logger-level=FULL
+
+# Disable Feign retry (use Resilience4j Retry instead)
+feign.client.config.default.retryer=feign.Retryer$Default(0,0,0)
+
+
+# ------------------------------
+# RESILIENCE4J CIRCUITBREAKER
+# ------------------------------
+resilience4j.circuitbreaker.instances.accountServiceCB.registerHealthIndicator=true
+resilience4j.circuitbreaker.instances.accountServiceCB.slidingWindowType=COUNT_BASED
+resilience4j.circuitbreaker.instances.accountServiceCB.slidingWindowSize=10
+resilience4j.circuitbreaker.instances.accountServiceCB.minimumNumberOfCalls=5
+
+# Trip when 50% requests fail or slow
+resilience4j.circuitbreaker.instances.accountServiceCB.failureRateThreshold=50
+resilience4j.circuitbreaker.instances.accountServiceCB.slowCallRateThreshold=50
+
+# Slow call threshold
+resilience4j.circuitbreaker.instances.accountServiceCB.slowCallDurationThreshold=2000ms
+
+# OPEN \u2192 HALF-OPEN
+resilience4j.circuitbreaker.instances.accountServiceCB.waitDurationInOpenState=5s
+resilience4j.circuitbreaker.instances.accountServiceCB.permittedNumberOfCallsInHalfOpenState=3
+
+# Record Feign exceptions
+resilience4j.circuitbreaker.instances.accountServiceCB.recordExceptions=feign.FeignException
+
+
+# ------------------------------
+# RESILIENCE4J TIME LIMITER
+# ------------------------------
+resilience4j.timelimiter.instances.accountServiceCB.timeoutDuration=5s
+resilience4j.timelimiter.instances.accountServiceCB.cancelRunningFuture=true
+
+
+# ------------------------------
+# RESILIENCE4J RETRY (RECOMMENDED)
+# ------------------------------
+resilience4j.retry.instances.accountServiceRetry.max-attempts=3
+resilience4j.retry.instances.accountServiceRetry.wait-duration=300ms
+
+# Retry only these exceptions
+resilience4j.retry.instances.accountServiceRetry.retry-exceptions=feign.RetryableException,feign.FeignException$ServiceUnavailable
+
+# Do NOT retry business logic exceptions
+resilience4j.retry.instances.accountServiceRetry.ignore-exceptions=\
+  com.exceptions.AccountNotFoundException,\
+  com.exceptions.InsufficientBalanceException,\
+  com.exceptions.SameAccountStatusException,\
+  com.exceptions.BadRequestException

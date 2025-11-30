@@ -1,0 +1,247 @@
+package com.service;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import java.util.Optional;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestTemplate;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import com.exceptions.AccountNotFoundException;
+import com.exceptions.DatabaseException;
+import com.exceptions.InactiveAccountException;
+import com.exceptions.InsufficientBalanceException;
+import com.exceptions.SameAccountStatusException;
+import com.model.Account;
+import com.model.dto.AccountCreateRequest;
+import com.model.dto.AccountStatusUpdateRequest;
+import com.model.dto.BalanceUpdateRequest;
+import com.repository.AccountRepository;
+import com.service.impl.AccountService;
+import com.util.enums.Status;
+import com.util.enums.UpdateType;
+
+
+@ExtendWith(MockitoExtension.class)
+public class AccountServiceTest {
+	
+	@Mock
+	private AccountRepository accountRepository;
+	
+	@InjectMocks
+	private AccountService accountService;
+	
+	@Test
+	void getAccountByAccountNumber_Success() {
+		Account account = new Account();
+		account.setAccountNumber("VIK3710");
+		account.setBalance(1000.0);
+		account.setStatus(Status.ACTIVE);
+		account.setHolderName("Vikas Sharma");
+		when(accountRepository.findByAccountNumber("VIK3710")).thenReturn(Optional.of(account));
+		Account found = accountService.getAccountByAccountNumber("VIK3710");
+		assertEquals(account, found);
+		verify(accountRepository,times(1)).findByAccountNumber("VIK3710");
+	}
+	
+	@Test
+	void getAccountByAccountNumber_Failure_AccountNotFound() {
+		when(accountRepository.findByAccountNumber("VIK3710")).thenReturn(Optional.empty());
+		assertThrows(AccountNotFoundException.class, ()-> accountService.getAccountByAccountNumber("VIK3710"));
+		verify(accountRepository,times(1)).findByAccountNumber("VIK3710");
+	}
+	
+	@Test
+	void getAccountByAccountNumber_Failure_DatabaseException() {
+		when(accountRepository.findByAccountNumber("VIK3710")).thenThrow(new DatabaseException("Database Error"));
+		assertThrows(DatabaseException.class, ()-> accountService.getAccountByAccountNumber("VIK3710"));
+		verify(accountRepository,times(1)).findByAccountNumber("VIK3710");
+	}
+	
+	@Test
+	void createAccount_Success() {
+		AccountCreateRequest accountCreateRequest = new AccountCreateRequest("Vikas Sharma");
+		Account savedAccount = new Account();
+		savedAccount.setAccountNumber("VIK3710");
+		savedAccount.setBalance(0);
+		savedAccount.setStatus(Status.ACTIVE);
+		savedAccount.setHolderName("Vikas Sharma");
+		when(accountRepository.save(any(Account.class))).thenReturn(savedAccount);
+		Account result = accountService.createAccount(accountCreateRequest);
+		assertEquals(savedAccount.getAccountNumber(),result.getAccountNumber());
+		assertEquals(savedAccount.getHolderName(), result.getHolderName());
+		assertEquals(savedAccount.getBalance(), result.getBalance());
+		assertEquals(savedAccount.getStatus(), result.getStatus());
+		verify(accountRepository,times(1)).save(any(Account.class));
+	}
+	
+	@Test
+	void createAccount_DatabaseError() {
+		AccountCreateRequest accountCreateRequest = new AccountCreateRequest("Vikas Sharma");
+		when(accountRepository.save(any(Account.class))).thenThrow(new DatabaseException("Database Error"));
+		assertThrows(DatabaseException.class, ()->accountService.createAccount(accountCreateRequest));
+		verify(accountRepository,times(1)).save(any(Account.class));
+	}
+	
+	@Test
+	void updateAccountBalance_Deposit_Success() {
+		String accoutNumber = "VIK3710";
+		BalanceUpdateRequest balanceUpdateRequest = new BalanceUpdateRequest(1000, UpdateType.DEPOSIT);
+		Account account = new Account();
+		account.setAccountNumber("VIK3710");
+		account.setBalance(0);
+		account.setStatus(Status.ACTIVE);
+		account.setHolderName("Vikas Sharma");
+		when(accountRepository.findByAccountNumber(accoutNumber)).thenReturn(Optional.of(account));
+		Account updatedAccountMock = new Account();
+		updatedAccountMock.setAccountNumber("VIK3710");
+		updatedAccountMock.setBalance(1000);
+		updatedAccountMock.setStatus(Status.ACTIVE);
+		updatedAccountMock.setHolderName("Vikas Sharma");
+		when(accountRepository.save(account)).thenReturn(updatedAccountMock);
+		Account updatedAccount = accountService.updateAccountBalance(accoutNumber, balanceUpdateRequest);
+		assertEquals(updatedAccountMock, updatedAccount);
+		verify(accountRepository,times(1)).findByAccountNumber(accoutNumber);
+		verify(accountRepository,times(1)).save(account);
+	}
+	
+	@Test
+	void updateAccountBalance_Withdraw_Success() {
+		String accoutNumber = "VIK3710";
+		BalanceUpdateRequest balanceUpdateRequest = new BalanceUpdateRequest(1000, UpdateType.WITHDRAW);
+		Account account = new Account();
+		account.setAccountNumber("VIK3710");
+		account.setBalance(1000);
+		account.setStatus(Status.ACTIVE);
+		account.setHolderName("Vikas Sharma");
+		when(accountRepository.findByAccountNumber(accoutNumber)).thenReturn(Optional.of(account));
+		Account updatedAccountMock = new Account();
+		updatedAccountMock.setAccountNumber("VIK3710");
+		updatedAccountMock.setBalance(0);
+		updatedAccountMock.setStatus(Status.ACTIVE);
+		updatedAccountMock.setHolderName("Vikas Sharma");
+		when(accountRepository.save(account)).thenReturn(updatedAccountMock);
+		Account updatedAccount = accountService.updateAccountBalance(accoutNumber, balanceUpdateRequest);
+		assertEquals(updatedAccountMock, updatedAccount);
+		verify(accountRepository,times(1)).findByAccountNumber(accoutNumber);
+		verify(accountRepository,times(1)).save(account);
+	}
+	
+	@Test
+	void updateAccountBalance_FindingAccount_AccountNotFound() {
+		String accoutNumber = "VIK3710";
+		BalanceUpdateRequest balanceUpdateRequest = new BalanceUpdateRequest(1000, UpdateType.DEPOSIT);
+		when(accountRepository.findByAccountNumber(accoutNumber)).thenReturn(Optional.empty());
+		assertThrows(AccountNotFoundException.class, ()->accountService.updateAccountBalance(accoutNumber, balanceUpdateRequest));
+		verify(accountRepository,times(1)).findByAccountNumber(accoutNumber);
+	}
+	
+	@Test
+	void updateAccountBalance_FindingAccount_DatabaseException() {
+		String accoutNumber = "VIK3710";
+		BalanceUpdateRequest balanceUpdateRequest = new BalanceUpdateRequest(1000, UpdateType.DEPOSIT);
+		when(accountRepository.findByAccountNumber(accoutNumber)).thenThrow(new DatabaseException("Database Error"));
+		assertThrows(DatabaseException.class, ()->accountService.updateAccountBalance(accoutNumber, balanceUpdateRequest));
+		verify(accountRepository,times(1)).findByAccountNumber(accoutNumber);
+	}
+	
+	@Test
+	void updateAccountBalance_InactiveStatus() {
+		String accoutNumber = "VIK3710";
+		Account account = new Account();
+		account.setAccountNumber("VIK3710");
+		account.setBalance(0);
+		account.setStatus(Status.INACTIVE);
+		account.setHolderName("Vikas Sharma");
+		BalanceUpdateRequest balanceUpdateRequest = new BalanceUpdateRequest(1000, UpdateType.DEPOSIT);
+		when(accountRepository.findByAccountNumber(accoutNumber)).thenReturn(Optional.of(account));
+		assertThrows(InactiveAccountException.class, ()->accountService.updateAccountBalance(accoutNumber, balanceUpdateRequest));
+		verify(accountRepository,times(1)).findByAccountNumber(accoutNumber);
+	}
+	
+	@Test
+	void updateAccountBalance_InsufficientBalance() {
+		String accoutNumber = "VIK3710";
+		Account account = new Account();
+		account.setAccountNumber("VIK3710");
+		account.setBalance(0);
+		account.setStatus(Status.ACTIVE);
+		account.setHolderName("Vikas Sharma");
+		BalanceUpdateRequest balanceUpdateRequest = new BalanceUpdateRequest(1000, UpdateType.WITHDRAW);
+		when(accountRepository.findByAccountNumber(accoutNumber)).thenReturn(Optional.of(account));
+		assertThrows(InsufficientBalanceException.class, ()->accountService.updateAccountBalance(accoutNumber, balanceUpdateRequest));
+		verify(accountRepository,times(1)).findByAccountNumber(accoutNumber);
+	}
+	
+	@Test
+	void updateAccountBalance_SavingBalance_DatabaseException() {
+		String accoutNumber = "VIK3710";
+		Account account = new Account();
+		account.setAccountNumber("VIK3710");
+		account.setBalance(1000);
+		account.setStatus(Status.ACTIVE);
+		account.setHolderName("Vikas Sharma");
+		BalanceUpdateRequest balanceUpdateRequest = new BalanceUpdateRequest(1000, UpdateType.WITHDRAW);
+		when(accountRepository.findByAccountNumber(accoutNumber)).thenReturn(Optional.of(account));
+		when(accountRepository.save(any(Account.class))).thenThrow(new DatabaseException("Database Error"));
+		assertThrows(DatabaseException.class, ()->accountService.updateAccountBalance(accoutNumber, balanceUpdateRequest));
+		verify(accountRepository,times(1)).findByAccountNumber(accoutNumber);
+		verify(accountRepository,times(1)).save(any(Account.class));
+	}
+	
+	@Test
+	void updateAccountStatus_Success() {
+		String accoutNumber = "VIK3710";
+		Account account = new Account();
+		account.setAccountNumber("VIK3710");
+		account.setBalance(1000);
+		account.setStatus(Status.ACTIVE);
+		account.setHolderName("Vikas Sharma");
+		AccountStatusUpdateRequest accountStatusUpdateRequest = new AccountStatusUpdateRequest(Status.INACTIVE);
+		when(accountRepository.findByAccountNumber(accoutNumber)).thenReturn(Optional.of(account));
+		Account updatedAccount = new Account();
+		updatedAccount.setAccountNumber("VIK3710");
+		updatedAccount.setBalance(1000);
+		updatedAccount.setStatus(Status.INACTIVE);
+		updatedAccount.setHolderName("Vikas Sharma");
+		when(accountRepository.save(any(Account.class))).thenReturn(updatedAccount);
+		Account result = accountService.updateAccountStatus(accoutNumber, accountStatusUpdateRequest);
+		verify(accountRepository,times(1)).findByAccountNumber(accoutNumber);
+		verify(accountRepository,times(1)).save(any(Account.class));
+	}
+	@Test
+	void updateAccountStatus_AccountNotFound() {
+		String accoutNumber = "VIK3710";
+		Account account = new Account();
+		account.setAccountNumber("VIK3710");
+		account.setBalance(1000);
+		account.setStatus(Status.ACTIVE);
+		account.setHolderName("Vikas Sharma");
+		AccountStatusUpdateRequest accountStatusUpdateRequest = new AccountStatusUpdateRequest(Status.ACTIVE);
+		when(accountRepository.findByAccountNumber(accoutNumber)).thenReturn(Optional.of(account));
+		assertThrows(SameAccountStatusException.class, ()->accountService.updateAccountStatus(accoutNumber, accountStatusUpdateRequest));
+		verify(accountRepository,times(1)).findByAccountNumber(accoutNumber);
+	}
+	@Test
+	void updateAccountStatus_SameAccountStatus() {
+		String accoutNumber = "VIK3710";
+		Account account = new Account();
+		account.setAccountNumber("VIK3710");
+		account.setBalance(1000);
+		account.setStatus(Status.ACTIVE);
+		account.setHolderName("Vikas Sharma");
+		AccountStatusUpdateRequest accountStatusUpdateRequest = new AccountStatusUpdateRequest(Status.ACTIVE);
+		when(accountRepository.findByAccountNumber(accoutNumber)).thenReturn(Optional.of(account));
+		assertThrows(SameAccountStatusException.class, ()->accountService.updateAccountStatus(accoutNumber, accountStatusUpdateRequest));
+		verify(accountRepository,times(1)).findByAccountNumber(accoutNumber);
+	}
+}

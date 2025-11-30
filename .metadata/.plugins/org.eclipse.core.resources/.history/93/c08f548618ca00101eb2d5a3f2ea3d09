@@ -1,0 +1,90 @@
+package com.service.impl;
+
+import java.util.Optional;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import com.exceptions.AccountNotFoundException;
+import com.exceptions.DatabaseException;
+import com.model.Account;
+import com.model.dto.AccountCreateRequest;
+import com.model.dto.AccountStatusUpdateRequest;
+import com.model.dto.BalanceUpdateRequest;
+import com.model.dto.InsufficientBalanceException;
+import com.repository.AccountRepository;
+import com.service.AccountServiceInterface;
+import com.util.account.GenerateAccountNumber;
+import com.util.enums.Status;
+import com.util.enums.UpdateType;
+
+@Service
+public class AccountService implements AccountServiceInterface {
+	
+	@Autowired
+	private AccountRepository accountRepository;
+	
+	private final Logger LOGGER = LoggerFactory.getLogger(AccountRepository.class);
+	@Override
+	public Account getAccountByAccountNumber(String accountNumber) {
+		Optional<Account> account;
+		try {
+			account = accountRepository.findByAccountNumber(accountNumber);
+		}catch (Exception e) {
+			LOGGER.error("Database Error while fetching the account details for account number {}",accountNumber,e);
+			throw new DatabaseException(e.getMessage());
+		}
+		if(account.isEmpty()) {
+			LOGGER.warn("No Account exist with account number {}",accountNumber);
+			throw new AccountNotFoundException("No Account exist with account number " + accountNumber);
+		}
+		return account.get();
+	}
+
+	@Override
+	public Account createAccount(AccountCreateRequest accountCreateRequest) {
+		Account account = new Account();
+		account.setAccountNumber(accountCreateRequest.holderName());
+		account.setBalance(0);
+		account.setAccountNumber(GenerateAccountNumber.generate(accountCreateRequest.holderName()));
+		account.setStatus(Status.ACTIVE);
+		Account savedAccount;
+		try {
+			savedAccount = accountRepository.save(account);
+		}catch (Exception e) {
+			LOGGER.error("Database Error while saving the account for holder name {}",accountCreateRequest.holderName());
+			throw new DatabaseException(e.getMessage());
+		}
+	}
+
+	@Override
+	public Account updateAccountBalance(String accountNumber, BalanceUpdateRequest balanceUpdateRequest) {
+		Optional<Account> found;
+		try {
+			found = accountRepository.findByAccountNumber(accountNumber);
+		}catch (Exception e) {
+			LOGGER.error("Database Error while fetching the account details for account number {}",accountNumber,e);
+			throw new DatabaseException(e.getMessage());
+		}
+		if(found.isEmpty()) {
+			LOGGER.warn("No Account exist with account number {}",accountNumber);
+			throw new AccountNotFoundException("No Account exist with account number " + accountNumber);
+		}
+		Account account = found.get();
+		if(balanceUpdateRequest.updateType().equals(UpdateType.WITHDRAW)) {
+			if (balanceUpdateRequest.amount()>account.getBalance()) {
+				LOGGER.error("Insufficient Balance in the account with account number {}",accountNumber);
+				throw new InsufficientBalanceException("Insufficient Balance in the account with account number")
+			}
+		}
+	}
+
+	@Override
+	public Account updateAccountStatus(AccountStatusUpdateRequest accountStatusUpdateRequest) {
+		// TODO Auto-generated method stub
+		return null;
+	}
+
+}

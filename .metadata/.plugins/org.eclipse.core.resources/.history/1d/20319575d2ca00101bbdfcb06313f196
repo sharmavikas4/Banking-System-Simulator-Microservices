@@ -1,0 +1,5 @@
+package com.model.dto.account;
+
+public class AccountTransactionRequest {
+
+}

@@ -1,0 +1,604 @@
+package com.service;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import java.time.LocalDateTime;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import com.exceptions.AccountNotFoundException;
+import com.exceptions.BadRequestException;
+import com.exceptions.DatabaseException;
+import com.exceptions.ExternalServiceException;
+import com.exceptions.InactiveAccountException;
+import com.exceptions.InsufficientBalanceException;
+import com.model.Transaction;
+import com.model.dto.TransactionRequest;
+import com.model.dto.TransferRequest;
+import com.model.dto.TransferResponse;
+import com.model.dto.account.AccountTransactionRequest;
+import com.model.dto.account.AccountTransactionResponse;
+import com.model.dto.notification.NotificationRequest;
+import com.repository.TransactionRepository;
+import com.service.impl.TransactionService;
+import com.util.enums.Status;
+import com.util.enums.TransactionStatus;
+import com.util.enums.TransactionType;
+import com.util.enums.UpdateType;
+import com.util.feign.AccountServiceClient;
+import com.util.feign.NotificationServiceClient;
+import com.util.transaction.GenerateTransactionId;
+
+@ExtendWith(MockitoExtension.class)
+public class TransferServiceTest {
+	
+	@Mock
+	private TransactionRepository transactionRepository;
+	
+	@Mock
+	private AccountServiceClient accountServiceClient;
+	
+	@Mock
+	private NotificationServiceClient notificationServiceClient;
+	
+	@InjectMocks
+	private TransactionService transactionService;
+	
+	
+	private Transaction createTransaction(String sourceAccount,String destinationAccount,String txnId, double amount, TransactionStatus status) {
+	    Transaction transaction = new Transaction();
+	    transaction.setSourceAccount(sourceAccount);
+	    transaction.setDestinationAccount(destinationAccount);
+	    transaction.setAmount(amount);
+	    transaction.setTimestamp(LocalDateTime.now());
+	    transaction.setStatus(status);
+	    transaction.setType(TransactionType.TRANSFER);
+	    transaction.setTransactionId(txnId);
+	    return transaction;
+	}
+	
+	@Test
+	void transfer() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		String txnId = GenerateTransactionId.generate();
+		AccountTransactionResponse withdrawResponse = new AccountTransactionResponse("6929c62d33103c6a540ca089", sourceAccount,"Vikas Sharma" , amount, Status.ACTIVE);
+		AccountTransactionResponse depositResponse = new AccountTransactionResponse("6929d07733103c6a540ca096", destinationAccount, "Abhay Pratap", amount+1000, Status.ACTIVE);
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class))).thenReturn(withdrawResponse);
+		when(accountServiceClient.updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class))).thenReturn(depositResponse);
+		Transaction transaction = createTransaction(sourceAccount, destinationAccount,txnId , amount, TransactionStatus.SUCCESS);
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		TransferResponse response =	TransferResponse.builder()
+													.amount(transaction.getAmount())
+													.sourceAccount(transaction.getSourceAccount())
+													.destinationAccount(transaction.getDestinationAccount())
+													.timestamp(transaction.getTimestamp())
+													.status(transaction.getStatus())
+													.type(transaction.getType())
+													.transactionId(transaction.getTransactionId())
+													.id(transaction.getId())
+													.build();
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(any(NotificationRequest.class))).thenReturn(message);
+		TransferResponse transferResponse = transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount));
+		assertEquals(response.getAmount(), transferResponse.getAmount());
+		assertEquals(response.getSourceAccount(), transferResponse.getSourceAccount());
+		assertEquals(response.getDestinationAccount(), transferResponse.getDestinationAccount());
+		assertEquals(response.getStatus(), transferResponse.getStatus());
+		verify(accountServiceClient, times(1)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+		verify(accountServiceClient, times(1)).updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any(NotificationRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_withdraw_AccountNotFound() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		String txnId = GenerateTransactionId.generate();
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class))).thenThrow(new AccountNotFoundException("No Account Found"));
+		Transaction transaction = createTransaction(sourceAccount, destinationAccount,txnId , amount, TransactionStatus.FAILED);
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(any(NotificationRequest.class))).thenReturn(message);
+		assertThrows(AccountNotFoundException.class, () -> transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(1)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any(NotificationRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_withdraw_AccountNotFound_DatabaseException() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class))).thenThrow(new AccountNotFoundException("No Account Found"));
+		when(transactionRepository.save(any(Transaction.class))).thenThrow(new DatabaseException("Database Error"));
+		assertThrows(DatabaseException.class, () -> transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(1)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_withdraw_AccountNotFound_NotificaitionNotSent() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		String txnId = GenerateTransactionId.generate();
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class))).thenThrow(new AccountNotFoundException("No Account Found"));
+		Transaction transaction = createTransaction(sourceAccount, destinationAccount,txnId , amount, TransactionStatus.FAILED);
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		when(notificationServiceClient.sendNotification(any(NotificationRequest.class))).thenThrow(new ExternalServiceException("Service Unavailable"));
+		assertThrows(AccountNotFoundException.class, () -> transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(1)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any(NotificationRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_withdraw_InsufficientBalanceException() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		String txnId = GenerateTransactionId.generate();
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class))).thenThrow(new InsufficientBalanceException("Insufficient balance"));
+		Transaction transaction = createTransaction(sourceAccount, destinationAccount,txnId , amount, TransactionStatus.FAILED);
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(any(NotificationRequest.class))).thenReturn(message);
+		assertThrows(InsufficientBalanceException.class, () -> transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(1)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any(NotificationRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_withdraw_InsufficientBalanceException_DatabaseException() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class))).thenThrow(new InsufficientBalanceException("Insufficient balance"));
+		when(transactionRepository.save(any(Transaction.class))).thenThrow(new DatabaseException("Database Error"));
+		assertThrows(DatabaseException.class, () -> transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(1)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_withdraw_InsufficientBalanceException_NotificaitionNotSent() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		String txnId = GenerateTransactionId.generate();
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class))).thenThrow(new InsufficientBalanceException("Insufficient balance"));
+		Transaction transaction = createTransaction(sourceAccount, destinationAccount,txnId , amount, TransactionStatus.FAILED);
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		when(notificationServiceClient.sendNotification(any(NotificationRequest.class))).thenThrow(new ExternalServiceException("Service Unavailable"));
+		assertThrows(InsufficientBalanceException.class, () -> transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(1)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any(NotificationRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_withdraw_InactiveAccountException() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		String txnId = GenerateTransactionId.generate();
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class))).thenThrow(new InactiveAccountException("Inactive Account"));
+		Transaction transaction = createTransaction(sourceAccount, destinationAccount,txnId , amount, TransactionStatus.FAILED);
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(any(NotificationRequest.class))).thenReturn(message);
+		assertThrows(InactiveAccountException.class, () -> transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(1)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any(NotificationRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_withdraw_InactiveAccountException_DatabaseException() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class))).thenThrow(new InactiveAccountException("Inactive Account"));
+		when(transactionRepository.save(any(Transaction.class))).thenThrow(new DatabaseException("Database Error"));
+		assertThrows(DatabaseException.class, () -> transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(1)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_withdraw_InactiveAccountException_NotificaitionNotSent() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		String txnId = GenerateTransactionId.generate();
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class))).thenThrow(new InactiveAccountException("Inactive Account"));
+		Transaction transaction = createTransaction(sourceAccount, destinationAccount,txnId , amount, TransactionStatus.FAILED);
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		when(notificationServiceClient.sendNotification(any(NotificationRequest.class))).thenThrow(new ExternalServiceException("Service Unavailable"));
+		assertThrows(InactiveAccountException.class, () -> transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(1)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any(NotificationRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_withdraw_BadRequestException() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		String txnId = GenerateTransactionId.generate();
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class))).thenThrow(new BadRequestException("Validation Failed"));
+		Transaction transaction = createTransaction(sourceAccount, destinationAccount,txnId , amount, TransactionStatus.FAILED);
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(any(NotificationRequest.class))).thenReturn(message);
+		assertThrows(BadRequestException.class, () -> transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(1)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any(NotificationRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_withdraw_BadRequestException_DatabaseException() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class))).thenThrow(new BadRequestException("Validation Failed"));
+		when(transactionRepository.save(any(Transaction.class))).thenThrow(new DatabaseException("Database Error"));
+		assertThrows(DatabaseException.class, () -> transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(1)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_withdraw_BadRequestException_NotificaitionNotSent() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		String txnId = GenerateTransactionId.generate();
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class))).thenThrow(new BadRequestException("Validation Failed"));
+		Transaction transaction = createTransaction(sourceAccount, destinationAccount,txnId , amount, TransactionStatus.FAILED);
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		when(notificationServiceClient.sendNotification(any(NotificationRequest.class))).thenThrow(new ExternalServiceException("Service Unavailable"));
+		assertThrows(BadRequestException.class, () -> transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(1)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any(NotificationRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_withdraw_ExternalDatabaseException() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		String txnId = GenerateTransactionId.generate();
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class))).thenThrow(new DatabaseException("Database Error"));
+		Transaction transaction = createTransaction(sourceAccount, destinationAccount,txnId , amount, TransactionStatus.FAILED);
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(any(NotificationRequest.class))).thenReturn(message);
+		assertThrows(DatabaseException.class, () -> transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(1)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any(NotificationRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_withdraw_ExternalDatabaseException_DatabaseException() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class))).thenThrow(new DatabaseException("Database Error"));
+		when(transactionRepository.save(any(Transaction.class))).thenThrow(new DatabaseException("Database Error"));
+		assertThrows(DatabaseException.class, () -> transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(1)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_withdraw_ExternalDatabaseException_NotificaitionNotSent() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		String txnId = GenerateTransactionId.generate();
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class))).thenThrow(new DatabaseException("Database Error"));
+		Transaction transaction = createTransaction(sourceAccount, destinationAccount,txnId , amount, TransactionStatus.FAILED);
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		when(notificationServiceClient.sendNotification(any(NotificationRequest.class))).thenThrow(new ExternalServiceException("Service Unavailable"));
+		assertThrows(DatabaseException.class, () -> transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(1)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any(NotificationRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_withdraw_ExternalServiceException() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		String txnId = GenerateTransactionId.generate();
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class))).thenThrow(new ExternalServiceException("External Service Error"));
+		Transaction transaction = createTransaction(sourceAccount, destinationAccount,txnId , amount, TransactionStatus.FAILED);
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(any(NotificationRequest.class))).thenReturn(message);
+		assertThrows(ExternalServiceException.class, () -> transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(1)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any(NotificationRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_withdraw_ExternalServiceException_DatabaseException() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class))).thenThrow(new ExternalServiceException("External Service Error"));
+		when(transactionRepository.save(any(Transaction.class))).thenThrow(new DatabaseException("Database Error"));
+		assertThrows(DatabaseException.class, () -> transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(1)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_withdraw_ExternalServiceException_NotificaitionNotSent() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		String txnId = GenerateTransactionId.generate();
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class))).thenThrow(new ExternalServiceException("External Service Error"));
+		Transaction transaction = createTransaction(sourceAccount, destinationAccount,txnId , amount, TransactionStatus.FAILED);
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		when(notificationServiceClient.sendNotification(any(NotificationRequest.class))).thenThrow(new ExternalServiceException("Service Unavailable"));
+		assertThrows(ExternalServiceException.class, () -> transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(1)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any(NotificationRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_deposit_AccountNotFound() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		String txnId = GenerateTransactionId.generate();
+		AccountTransactionResponse withdrawResponse = new AccountTransactionResponse("6929c62d33103c6a540ca089", sourceAccount,"Vikas Sharma" , amount, Status.ACTIVE);
+		AccountTransactionResponse rollback = new AccountTransactionResponse("6929c62d33103c6a540ca089", sourceAccount,"Vikas Sharma" , amount+1000, Status.ACTIVE);
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any())).thenReturn(withdrawResponse).thenReturn(rollback);
+		when(accountServiceClient.updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class))).thenThrow(new AccountNotFoundException("No Account Found"));
+		Transaction transaction = createTransaction(sourceAccount, destinationAccount,txnId , amount, TransactionStatus.FAILED);
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(any(NotificationRequest.class))).thenReturn(message);
+		assertThrows(AccountNotFoundException.class, ()->transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(2)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+		verify(accountServiceClient, times(1)).updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(2)).sendNotification(any(NotificationRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_deposit_AccountNotFound_DatabaseException() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		AccountTransactionResponse withdrawResponse = new AccountTransactionResponse("6929c62d33103c6a540ca089", sourceAccount,"Vikas Sharma" , amount, Status.ACTIVE);
+		AccountTransactionResponse rollback = new AccountTransactionResponse("6929c62d33103c6a540ca089", sourceAccount,"Vikas Sharma" , amount+1000, Status.ACTIVE);
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any())).thenReturn(withdrawResponse).thenReturn(rollback);
+		when(accountServiceClient.updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class))).thenThrow(new AccountNotFoundException("No Account Found"));
+		when(transactionRepository.save(any(Transaction.class))).thenThrow(new DatabaseException("Datbase Error"));
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(any(NotificationRequest.class))).thenReturn(message);
+		assertThrows(DatabaseException.class, ()->transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(2)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+		verify(accountServiceClient, times(1)).updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any(NotificationRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_deposit_AccountNotFound_RollBackFailed_AccountNotFound() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		String txnId = GenerateTransactionId.generate();
+		AccountTransactionResponse withdrawResponse = new AccountTransactionResponse("6929c62d33103c6a540ca089", sourceAccount,"Vikas Sharma" , amount, Status.ACTIVE);
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any())).thenReturn(withdrawResponse).thenThrow(new AccountNotFoundException("No Account Found"));
+		when(accountServiceClient.updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class))).thenThrow(new AccountNotFoundException("No Account Found"));
+		Transaction transaction = createTransaction(sourceAccount, destinationAccount,txnId , amount, TransactionStatus.FAILED);
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(any(NotificationRequest.class))).thenReturn(message);
+		assertThrows(AccountNotFoundException.class, ()->transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(2)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+		verify(accountServiceClient, times(1)).updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(2)).sendNotification(any(NotificationRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_deposit_AccountNotFound_RollBackFailed_AccountNotFound_DatabaseException() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		AccountTransactionResponse withdrawResponse = new AccountTransactionResponse("6929c62d33103c6a540ca089", sourceAccount,"Vikas Sharma" , amount, Status.ACTIVE);
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any())).thenReturn(withdrawResponse).thenThrow(new AccountNotFoundException("No Account Found"));
+		when(accountServiceClient.updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class))).thenThrow(new AccountNotFoundException("No Account Found"));
+		when(transactionRepository.save(any(Transaction.class))).thenThrow(new DatabaseException("Datbase Error"));
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(any(NotificationRequest.class))).thenReturn(message);
+		assertThrows(DatabaseException.class, ()->transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(2)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+		verify(accountServiceClient, times(1)).updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any(NotificationRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_deposit_AccountNotFound_RollBackFailed_InactiveAccountException() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		String txnId = GenerateTransactionId.generate();
+		AccountTransactionResponse withdrawResponse = new AccountTransactionResponse("6929c62d33103c6a540ca089", sourceAccount,"Vikas Sharma" , amount, Status.ACTIVE);
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any())).thenReturn(withdrawResponse).thenThrow(new AccountNotFoundException("No Account Found"));
+		when(accountServiceClient.updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class))).thenThrow(new InactiveAccountException("Inactive Account"));
+		Transaction transaction = createTransaction(sourceAccount, destinationAccount,txnId , amount, TransactionStatus.FAILED);
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(any(NotificationRequest.class))).thenReturn(message);
+		assertThrows(InactiveAccountException.class, ()->transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(2)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+		verify(accountServiceClient, times(1)).updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(2)).sendNotification(any(NotificationRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_deposit_AccountNotFound_RollBackFailed_InactiveAccountException_DatabaseException() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		AccountTransactionResponse withdrawResponse = new AccountTransactionResponse("6929c62d33103c6a540ca089", sourceAccount,"Vikas Sharma" , amount, Status.ACTIVE);
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any())).thenReturn(withdrawResponse).thenThrow(new AccountNotFoundException("No Account Found"));
+		when(accountServiceClient.updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class))).thenThrow(new InactiveAccountException("Inactive Account"));
+		when(transactionRepository.save(any(Transaction.class))).thenThrow(new DatabaseException("Datbase Error"));
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(any(NotificationRequest.class))).thenReturn(message);
+		assertThrows(DatabaseException.class, ()->transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(2)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+		verify(accountServiceClient, times(1)).updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any(NotificationRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_deposit_AccountNotFound_RollBackFailed_BadRequestException() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		String txnId = GenerateTransactionId.generate();
+		AccountTransactionResponse withdrawResponse = new AccountTransactionResponse("6929c62d33103c6a540ca089", sourceAccount,"Vikas Sharma" , amount, Status.ACTIVE);
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any())).thenReturn(withdrawResponse).thenThrow(new AccountNotFoundException("No Account Found"));
+		when(accountServiceClient.updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class))).thenThrow(new BadRequestException("Validation Failed"));
+		Transaction transaction = createTransaction(sourceAccount, destinationAccount,txnId , amount, TransactionStatus.FAILED);
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(any(NotificationRequest.class))).thenReturn(message);
+		assertThrows(BadRequestException.class, ()->transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(2)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+		verify(accountServiceClient, times(1)).updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(2)).sendNotification(any(NotificationRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_deposit_AccountNotFound_RollBackFailed_BadRequestException_DatabaseException() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		AccountTransactionResponse withdrawResponse = new AccountTransactionResponse("6929c62d33103c6a540ca089", sourceAccount,"Vikas Sharma" , amount, Status.ACTIVE);
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any())).thenReturn(withdrawResponse).thenThrow(new AccountNotFoundException("No Account Found"));
+		when(accountServiceClient.updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class))).thenThrow(new BadRequestException("Validation Failed"));
+		when(transactionRepository.save(any(Transaction.class))).thenThrow(new DatabaseException("Datbase Error"));
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(any(NotificationRequest.class))).thenReturn(message);
+		assertThrows(DatabaseException.class, ()->transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(2)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+		verify(accountServiceClient, times(1)).updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any(NotificationRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_deposit_AccountNotFound_RollBackFailed_ExternalDatabaseException() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		String txnId = GenerateTransactionId.generate();
+		AccountTransactionResponse withdrawResponse = new AccountTransactionResponse("6929c62d33103c6a540ca089", sourceAccount,"Vikas Sharma" , amount, Status.ACTIVE);
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any())).thenReturn(withdrawResponse).thenThrow(new AccountNotFoundException("No Account Found"));
+		when(accountServiceClient.updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class))).thenThrow(new DatabaseException("Database Error"));
+		Transaction transaction = createTransaction(sourceAccount, destinationAccount,txnId , amount, TransactionStatus.FAILED);
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(any(NotificationRequest.class))).thenReturn(message);
+		assertThrows(DatabaseException.class, ()->transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(2)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+		verify(accountServiceClient, times(1)).updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(2)).sendNotification(any(NotificationRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_deposit_AccountNotFound_RollBackFailed_ExternalDatabaseException_DatabaseException() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		AccountTransactionResponse withdrawResponse = new AccountTransactionResponse("6929c62d33103c6a540ca089", sourceAccount,"Vikas Sharma" , amount, Status.ACTIVE);
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any())).thenReturn(withdrawResponse).thenThrow(new AccountNotFoundException("No Account Found"));
+		when(accountServiceClient.updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class))).thenThrow(new DatabaseException("Database Error"));
+		when(transactionRepository.save(any(Transaction.class))).thenThrow(new DatabaseException("Datbase Error"));
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(any(NotificationRequest.class))).thenReturn(message);
+		assertThrows(DatabaseException.class, ()->transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(2)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+		verify(accountServiceClient, times(1)).updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any(NotificationRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_deposit_AccountNotFound_RollBackFailed_ExternalServiceException() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		String txnId = GenerateTransactionId.generate();
+		AccountTransactionResponse withdrawResponse = new AccountTransactionResponse("6929c62d33103c6a540ca089", sourceAccount,"Vikas Sharma" , amount, Status.ACTIVE);
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any())).thenReturn(withdrawResponse).thenThrow(new AccountNotFoundException("No Account Found"));
+		when(accountServiceClient.updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class))).thenThrow(new DatabaseException("Database Error"));
+		Transaction transaction = createTransaction(sourceAccount, destinationAccount,txnId , amount, TransactionStatus.FAILED);
+		when(transactionRepository.save(any(Transaction.class))).thenReturn(transaction);
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(any(NotificationRequest.class))).thenReturn(message);
+		assertThrows(ExternalServiceException.class, ()->transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(2)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+		verify(accountServiceClient, times(1)).updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(2)).sendNotification(any(NotificationRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+	
+	@Test
+	void transfer_deposit_AccountNotFound_RollBackFailed_ExternalServiceException_DatabaseException() {
+		String sourceAccount = "VIK3710";
+		String destinationAccount = "ABH7425";
+		double amount = 1000;
+		AccountTransactionResponse withdrawResponse = new AccountTransactionResponse("6929c62d33103c6a540ca089", sourceAccount,"Vikas Sharma" , amount, Status.ACTIVE);
+		when(accountServiceClient.updateBalance(eq(sourceAccount), any())).thenReturn(withdrawResponse).thenThrow(new AccountNotFoundException("No Account Found"));
+		when(accountServiceClient.updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class))).thenThrow(new DatabaseException("Database Error"));
+		when(transactionRepository.save(any(Transaction.class))).thenThrow(new DatabaseException("Datbase Error"));
+		String message = "Notification Logged Successfully";
+		when(notificationServiceClient.sendNotification(any(NotificationRequest.class))).thenReturn(message);
+		assertThrows(DatabaseException.class, ()->transactionService.transfer(new TransferRequest(amount, sourceAccount, destinationAccount)));
+		verify(accountServiceClient, times(2)).updateBalance(eq(sourceAccount), any(AccountTransactionRequest.class));
+		verify(accountServiceClient, times(1)).updateBalance(eq(destinationAccount), any(AccountTransactionRequest.class));
+	    verify(notificationServiceClient, times(1)).sendNotification(any(NotificationRequest.class));
+		verify(transactionRepository,times(1)).save(any(Transaction.class));
+	}
+}

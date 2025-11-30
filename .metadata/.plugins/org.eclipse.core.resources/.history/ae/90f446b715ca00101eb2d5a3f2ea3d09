@@ -1,0 +1,11 @@
+package com.model.dto;
+
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+
+public record AccountCreateRequest(
+		@NotBlank(message = "Account Number must not be null or only white spaces")
+		@Pattern(regexp = "^[A-Z]{3}\\d{4}$",message = "Account number must be three uppercase alphabets followed by four digits")
+		String accountNumber
+) {
+}

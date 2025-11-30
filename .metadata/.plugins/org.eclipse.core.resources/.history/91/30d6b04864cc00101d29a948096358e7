@@ -1,0 +1,14 @@
+package com.util.feign;
+
+import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.web.bind.annotation.PostMapping;
+
+import com.config.CorrelationIdRequestInterceptor;
+import com.model.dto.notification.NotificationRequest;
+
+@FeignClient(name="NotificationService",path = "/api/notifications",,configuration = CorrelationIdRequestInterceptor.class,fallbackFactory = NotificationServiceFallback.class)
+public interface NotificationServiceClient {
+	
+	@PostMapping("/send")
+	String sendNotification(NotificationRequest notificationRequest);
+}

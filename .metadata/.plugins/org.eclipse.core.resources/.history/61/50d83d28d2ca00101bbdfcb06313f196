@@ -1,0 +1,11 @@
+package com.service;
+
+import com.model.Transaction;
+import com.model.dto.AccountTransactionRequest;
+
+public interface TransactionServiceInterface {
+	
+	Transaction deposit(AccountTransactionRequest transactionRequest);
+	
+	Transaction withdraw(AccountTransactionRequest transactionRequest);
+}

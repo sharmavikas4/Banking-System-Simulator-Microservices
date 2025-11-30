@@ -1,0 +1,16 @@
+package com.util.feign;
+
+@Component
+class AccountServiceFallbackFactory implements FallbackFactory<AccountServiceClient> {
+    @Override
+    public AccountServiceClient create(Throwable cause) {
+        return new AccountServiceClient() {
+            @Override
+            public void updateBalance(String accountNumber, AccountTransactionRequest request) {
+                // handle fallback here
+                throw new AccountNotFoundException("Fallback: Account not found for " + accountNumber);
+            }
+        };
+    }
+}
+

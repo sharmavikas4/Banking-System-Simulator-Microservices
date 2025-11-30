@@ -1,0 +1,5 @@
+package com.model.dto.notification;
+
+public class NotificationRequest {
+
+}
