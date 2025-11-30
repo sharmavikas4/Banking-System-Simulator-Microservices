@@ -727,7 +727,7 @@ docker-compose down
 
 To remove volumes as well:
 
-```
+```bash
 docker-compose down -v
 ```
 
