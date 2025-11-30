@@ -1,0 +1,66 @@
+package com.util.feign;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+
+import com.exceptions.AccountNotFoundException;
+import com.exceptions.BadRequestException;
+import com.exceptions.DatabaseException;
+import com.exceptions.ExternalServiceException;
+import com.exceptions.InactiveAccountException;
+import com.exceptions.InsufficientBalanceException;
+
+import org.springframework.cloud.openfeign.FallbackFactory;
+import feign.FeignException;
+
+@Component
+public class AccountServiceFallback implements FallbackFactory<AccountServiceClient> {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(AccountServiceFallback.class);
+
+    @Override
+    public AccountServiceClient create(Throwable throwable) {
+
+        return (accountNumber, request) -> {
+            if (throwable instanceof FeignException fe) {
+                int status = fe.status();
+                String body = "";
+                try {
+                	body = fe.contentUTF8();
+                }catch (Exception e) {
+					LOGGER.warn("Error converting the error body {}",e);
+				}
+                switch (status) {
+	                case 404 -> {
+	                    LOGGER.warn("Account not found. status=404 body={}", body);
+	                    throw new AccountNotFoundException("No account found for accountNumber=" + accountNumber);
+	                }
+	                case 422 -> {
+	                    LOGGER.warn("Insufficient balance. status=422 body={}", body);
+	                    throw new InsufficientBalanceException("Insufficient balance for accountNumber=" + accountNumber);
+	                }
+	                case 423 -> {
+	                    LOGGER.warn("Inactive Account. status=423 body={}", body);
+	                    throw new InactiveAccountException("Account " + accountNumber + " is inactive and cannot be updated");
+	                }
+	                case 400 -> {
+	                    LOGGER.warn("Bad request. status=400 body={}", body);
+	                    throw new BadRequestException("Validation failed for request=" + request);
+	                }
+	                case 500 -> {
+	                    LOGGER.error("Database or internal service error. status=500 body={}", body);
+	                    throw new DatabaseException("Database or internal error occurred");
+	                }
+	                default -> {
+	                    LOGGER.error("Unexpected error from account service. status={} body={}", status, body);
+	                    throw new ExternalServiceException("Unexpected error from Account Service");
+	                }
+	            }
+            } else {
+                LOGGER.error("Circuit breaker open or unexpected error", throwable);
+                throw new ExternalServiceException("Account Service unavailable (Circuit Breaker OPEN)");
+            }
+        };
+    }
+}

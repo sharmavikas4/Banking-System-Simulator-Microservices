@@ -1,0 +1,126 @@
+version: '3.8'
+
+services:
+  eureka-server:
+    image: eurekaserver:latest
+    container_name: eureka-server
+    ports:
+      - "8761:8761"
+    environment:
+      - SPRING_APPLICATION_NAME=EurekaServer
+      - SERVER_PORT=8761
+      - EUREKA_CLIENT_REGISTER_WITH_EUREKA=false
+      - EUREKA_CLIENT_FETCH_REGISTRY=false
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8761/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  config-server:
+    image: configserver:latest
+    container_name: config-server
+    ports:
+      - "8084:8084"
+    environment:
+      - SPRING_APPLICATION_NAME=ConfigServer
+      - SERVER_PORT=8084
+      - EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE=http://eureka-server:8761/eureka
+      - SPRING_CLOUD_CONFIG_SERVER_GIT_URI=https://github.com/sharmavikas4/Banking-System-Simulator-Config-Files
+      - SPRING_CLOUD_CONFIG_SERVER_GIT_CLONE_ON_START=true
+      - SPRING_CLOUD_CONFIG_SERVER_GIT_DEFAULT_LABEL=main
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8084/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api-gateway:
+    image: apigateway:latest
+    container_name: api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_APPLICATION_NAME=ApiGateway
+      - SERVER_PORT=8080
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://config-server:8084
+      - SPRING_CLOUD_CONFIG_DISCOVERY_ENABLED=false
+      - SPRING_CLOUD_CONFIG_DISCOVERY_SERVICE_ID=ConfigServer
+      - EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE=http://eureka-server:8761/eureka
+
+    depends_on:
+      config-server:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  account-service:
+    image: accountservice:latest
+    container_name: account-service
+    ports:
+      - "8081:8081"
+    environment:
+      - SPRING_APPLICATION_NAME=AccountService
+      - SERVER_PORT=8081
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://config-server:8084
+      - SPRING_CLOUD_CONFIG_DISCOVERY_ENABLED=false
+      - SPRING_CLOUD_CONFIG_DISCOVERY_SERVICE_ID=ConfigServer
+      - EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE=http://eureka-server:8761/eureka
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8081/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  notification-service:
+    image: notificationservice:latest
+    container_name: notification-service
+    ports:
+      - "8083:8083"
+    environment:
+      - SPRING_APPLICATION_NAME=NotificationService
+      - SERVER_PORT=8083
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://config-server:8084
+      - SPRING_CLOUD_CONFIG_DISCOVERY_ENABLED=false
+      - SPRING_CLOUD_CONFIG_DISCOVERY_SERVICE_ID=ConfigServer
+      - EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE=http://eureka-server:8761/eureka
+    depends_on:
+      account-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8083/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  transaction-service:
+    image: transactionservice:latest
+    container_name: transaction-service
+    ports:
+      - "8082:8082"
+    environment:
+      - SPRING_APPLICATION_NAME=TransactionService
+      - SERVER_PORT=8082
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://config-server:8084
+      - SPRING_CLOUD_CONFIG_DISCOVERY_ENABLED=false
+      - SPRING_CLOUD_CONFIG_DISCOVERY_SERVICE_ID=ConfigServer
+      - EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE=http://eureka-server:8761/eureka
+    depends_on:
+      notification-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8082/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10

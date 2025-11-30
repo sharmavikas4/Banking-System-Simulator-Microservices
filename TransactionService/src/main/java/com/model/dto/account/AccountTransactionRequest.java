@@ -1,0 +1,24 @@
+package com.model.dto.account;
+
+import com.util.enums.UpdateType;
+
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.media.Schema.RequiredMode;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.Setter;
+
+@Getter
+@Setter
+@Builder
+public class AccountTransactionRequest {
+	@Schema(description = "The amount to be added to or deducted from the account balance. This value must be a positive, non-zero number.",example = "1000",requiredMode = RequiredMode.REQUIRED)
+	@Positive(message = "Amount must be positive non-zero value")
+	private double amount;
+	
+	@Schema(description = "The type of balance update to perform. Allowed values are defined in the UpdateType enum, such as DEPOSIT or WITHDRAW.",example = "DEPOSIT",requiredMode = RequiredMode.REQUIRED)
+	@NotNull(message = "Update type must not be null")
+	private UpdateType updateType;
+}

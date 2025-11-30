@@ -1,0 +1,42 @@
+package com.model;
+
+import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.mapping.Document;
+
+import com.util.enums.Status;
+
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+@Document(collection = "accounts")
+@Getter
+@Setter
+@AllArgsConstructor
+@NoArgsConstructor
+public class Account {
+	
+	@Id
+	@NotBlank(message = "Account ID must not be null or only white spaces")
+	@Pattern(regexp = "[a-z0-9]+",message = "Account ID must contain only lower case alphabers and digits")
+	private String id;
+	
+	@NotBlank(message = "Account Number must not be null or only white spaces")
+	@Pattern(regexp = "^[A-Z]{3}\\d{4}$",message = "Account number must be three uppercase alphabets followed by four digits")
+	private String accountNumber;
+	 
+	@NotBlank(message = "Account Holder Name must not be null or only white spaces")
+	@Pattern(regexp = "[A-Za-z ]+",message = "Account Holder Name must contain only alphabets and spaces")
+	private String holderName; 
+	
+	@Min(value = 0,message = "Balance must be zero or positive non-zero value")
+	private double balance;
+	
+	@NotNull(message = "Status must not be null")
+	private Status status;
+}

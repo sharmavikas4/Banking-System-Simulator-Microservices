@@ -1,0 +1,20 @@
+package com.service;
+
+import java.util.List;
+
+import com.model.Transaction;
+import com.model.dto.TransactionRequest;
+import com.model.dto.TransactionResponse;
+import com.model.dto.TransferRequest;
+import com.model.dto.TransferResponse;
+
+public interface TransactionServiceInterface {
+	
+	TransactionResponse deposit(TransactionRequest transactionRequest);
+	
+	TransactionResponse withdraw(TransactionRequest transactionRequest);
+	
+	TransferResponse transfer(TransferRequest transferRequest);
+	
+	List<Transaction> getAllTransactions(String accountNumber);
+}
