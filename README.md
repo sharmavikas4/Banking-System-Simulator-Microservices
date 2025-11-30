@@ -32,7 +32,7 @@ This project refactors a monolithic banking system into fully independent micros
 
 ### Architecture Diagram
 
-[![Architecture Diagram](./Architecture.png)]
+![Architecture Diagram](./Architecture.png)
 
 ## Microservices Breakdown
 
