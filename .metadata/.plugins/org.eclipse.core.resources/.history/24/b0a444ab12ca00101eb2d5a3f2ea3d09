@@ -1,8 +1,0 @@
-package com.service;
-
-import com.model.Account;
-
-public interface AccountServiceInterface {
-	
-	Account getAccountByAccountNumber(String accountNumber)
-}

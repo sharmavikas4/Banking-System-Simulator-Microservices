@@ -1,8 +1,0 @@
-package com.model.dto.notification;
-
-import jakarta.validation.constraints.NotBlank;
-
-public class NotificationRequest {
-	@NotBlank(message = "Message must not be blank")
-    private String message;
-}

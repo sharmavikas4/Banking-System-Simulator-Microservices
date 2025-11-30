@@ -1,5 +1,0 @@
-package com.util.transaction;
-
-public class GenerateTransactionId {
-
-}

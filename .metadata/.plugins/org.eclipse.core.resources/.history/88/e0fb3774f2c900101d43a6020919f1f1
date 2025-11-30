@@ -1,3 +1,0 @@
-spring.application.name=AccountService
-spring.data.mongodb.uri=http://localhost:27017/account
-eureka.client.service-url.defaulZone=http://localhost:8716/eureka
